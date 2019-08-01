@@ -18,7 +18,7 @@ private class Client {
 
     fun main(args: Array<String>) {
         // Create an RPC connection to the node.
-        require(args.size == 3) { "Usage: Client <node address> <rpc username> <rpc password>" }
+        require(args.size == 3) { "Usage: Client <node reference> <rpc username> <rpc password>" }
         val nodeAddress = parse(args[0])
         val rpcUsername = args[1]
         val rpcPassword = args[2]

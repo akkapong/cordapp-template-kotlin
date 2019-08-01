@@ -1,9 +1,14 @@
 package com.template.webserver
 
+import com.fasterxml.jackson.databind.ObjectMapper
+import net.corda.client.jackson.JacksonSupport
 import org.springframework.boot.Banner
 import org.springframework.boot.SpringApplication
 import org.springframework.boot.WebApplicationType.SERVLET
 import org.springframework.boot.autoconfigure.SpringBootApplication
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+
 
 /**
  * Our Spring Boot application.
@@ -20,3 +25,4 @@ fun main(args: Array<String>) {
     app.webApplicationType = SERVLET
     app.run(*args)
 }
+
