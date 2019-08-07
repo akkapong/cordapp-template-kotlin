@@ -6,6 +6,7 @@ import com.r3.corda.lib.tokens.contracts.types.TokenType
 import com.r3.corda.lib.tokens.money.FiatCurrency
 import com.r3.corda.lib.tokens.workflows.utilities.tokenAmountCriteria
 import net.corda.core.contracts.Amount
+import net.corda.core.identity.CordaX500Name
 import net.corda.core.identity.Party
 import net.corda.core.internal.sumByLong
 import net.corda.core.node.ServiceHub
@@ -40,3 +41,15 @@ fun getMyToken(serviceHub: ServiceHub, holder: Party, issuer: Party, currencyCod
 
     return allFungibleToken.sumByLong { it.amount.quantity }.toBigDecimal()
 }
+
+fun getAllParties(serviceHub: ServiceHub) : List<Party> {
+    return allParties.map {
+        serviceHub.identityService.wellKnownPartyFromX500Name(CordaX500Name.parse(it))!!
+    }
+}
+
+
+val allParties = listOf(
+        "O=PartyA,L=London,C=GB",
+        "O=PartyB,L=New York,C=US"
+)

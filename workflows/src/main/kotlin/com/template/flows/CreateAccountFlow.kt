@@ -1,35 +1,22 @@
 package com.template.flows
 
 import co.paralleluniverse.fibers.Suspendable
-import com.r3.corda.lib.tokens.contracts.states.FungibleToken
-import com.r3.corda.lib.tokens.contracts.utilities.heldBy
-import com.r3.corda.lib.tokens.contracts.utilities.issuedBy
-import com.r3.corda.lib.tokens.contracts.utilities.of
-import com.r3.corda.lib.tokens.contracts.utilities.withNotary
-import com.r3.corda.lib.tokens.workflows.flows.rpc.ConfidentialIssueTokens
-import com.r3.corda.lib.tokens.workflows.flows.rpc.CreateEvolvableTokens
-import com.r3.corda.lib.tokens.workflows.utilities.getPreferredNotary
-import com.r3.corda.lib.tokens.workflows.utilities.heldBy
 import com.template.contracts.AccountContract
 import com.template.schemas.AccountSchema
-import com.template.states.AKKTokenType
 import com.template.states.Account
-import com.template.states.DVToken
+import com.template.utilities.Conditions.using
+import net.corda.core.contracts.Command
+import net.corda.core.contracts.requireThat
 import net.corda.core.flows.*
-import net.corda.core.identity.CordaX500Name
+import net.corda.core.identity.Party
 import net.corda.core.node.services.Vault
 import net.corda.core.node.services.queryBy
 import net.corda.core.node.services.vault.*
 import net.corda.core.transactions.SignedTransaction
+import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.utilities.ProgressTracker
 import net.corda.core.utilities.ProgressTracker.Step
-import com.template.utilities.Conditions.using
-import net.corda.core.contracts.Command
-import net.corda.core.contracts.requireThat
-import net.corda.core.identity.Party
-import net.corda.core.transactions.TransactionBuilder
 import java.math.BigDecimal
-import java.time.Instant
 
 object CreateAccountFlow {
     @InitiatingFlow
@@ -74,16 +61,13 @@ object CreateAccountFlow {
 
             inspect()
 
-
-
             // Stage 1.
             progressTracker.currentStep = GENERATING_TRANSACTION
             // Generate an unsigned transaction.
             val accountState = Account(
                     accountName = accountName,
                     ourParty = ourIdentity,
-                    otherParty = otherParty,
-                    amount = crateToken()
+                    otherParty = otherParty
             )
             val txCommand = Command(AccountContract.Commands.Create(), accountState.participants.map { it.owningKey })
             val txBuilder = TransactionBuilder(notary)
@@ -136,30 +120,6 @@ object CreateAccountFlow {
                     criteria = queryCriteria,
                     paging = PageSpecification(DEFAULT_PAGE_NUM, MAX_PAGE_SIZE)).states.map { it.state.data }
         }
-
-        @Suspendable
-        private fun crateToken(): FungibleToken {
-            // From within the flow.
-            val dvTokenType = DVToken(
-                    date = Instant.now(),
-                    maintainers = listOf(ourIdentity, otherParty),
-                    fractionDigits = 2
-
-            )
-
-            val notary: Party = getPreferredNotary(serviceHub) // Or provide notary party using your favourite function from NotaryUtilities.
-            // We need to create the evolvable token first.
-            subFlow(CreateEvolvableTokens(dvTokenType withNotary notary))
-
-            val dvPtr = dvTokenType.toPointer<DVToken>()
-
-            // Create FungibleToken
-            val issuedToken = amount of dvPtr issuedBy ourIdentity heldBy otherParty
-            subFlow(ConfidentialIssueTokens(listOf(issuedToken)))
-
-            return issuedToken
-        }
-
 
     }
 
