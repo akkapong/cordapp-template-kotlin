@@ -16,13 +16,13 @@ import com.template.schemas.AccountSchema
 import com.template.states.Account
 import com.template.states.DVToken
 import com.template.utilities.Conditions.using
-import com.template.utilities.allParties
 import com.template.utilities.getAllParties
 import net.corda.core.contracts.Command
 import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.requireThat
 import net.corda.core.flows.*
 import net.corda.core.identity.CordaX500Name
+import net.corda.core.identity.Party
 import net.corda.core.node.services.Vault
 import net.corda.core.node.services.queryBy
 import net.corda.core.node.services.vault.*
@@ -81,12 +81,13 @@ object TransferDVToken {
             // We can specify preferred notary in cordapp config file, otherwise the first one from network parameters is chosen.
             val txBuilder = TransactionBuilder(notary = getPreferredNotary(serviceHub))
 
-            //TODO
             // If from account is null or empty we will transfer amount from node to account
             when (fromAccount.isNullOrEmpty()) {
                 true -> transferFromNodeToAccount(txBuilder)
-                false -> txBuilder
+                false -> transferFromAccountToAccount(txBuilder)
             }
+
+            logger.info("Transaction before sign txBuilder: $txBuilder")
 
             // Stage 2.
             progressTracker.currentStep = VERIFYING_TRANSACTION
@@ -133,19 +134,93 @@ object TransferDVToken {
 
             "Destination must not be empty." using (toAccount.isNotEmpty() && involvedAccountsMap[toAccount] != null)
 
+            if (fromAccount != null) {
+                // Check available amount
+                val senderAccount = involvedAccountsMap[fromAccount]!!.state.data
+                val senderAmount = senderAccount.amount?.amount?.toDecimal() ?: BigDecimal.ZERO
+                "Sender must have enough token for transfer." using (senderAmount >= amount)
+            }
+
+            // TODO: check amount of node
+
         }
 
+        /**
+         * Method for create transaction that include
+         * 1. move token to node
+         * 2. update receiver account
+         */
         private fun transferFromNodeToAccount(txBuilder: TransactionBuilder) {
-            //TODO
             val destinationAccountIn = involvedAccountsMap[toAccount]!!
             val destinationNode = destinationAccountIn.state.data.ourParty
 
             // Move token to destination
             val dvPtr = getDvTokenPointer()
-            val amountToken = amount of dvPtr
+
+            // Move token to another node
+            moveTokenToAnotherNode(
+                    txBuilder = txBuilder,
+                    destinationNode = destinationNode,
+                    dvPtr = dvPtr
+            )
+
+            // Update amount in receiver account
+            updateReceiverAmount(
+                    txBuilder = txBuilder,
+                    destinationAccountIn = destinationAccountIn,
+                    dvPtr = dvPtr
+            )
+
+        }
+
+        /**
+         * Method for create transaction that include
+         *  1 move token to same node
+         *  2 increase amount for receiver
+         *  3 decrease amount for sender
+         *
+         */
+        private fun transferFromAccountToAccount(txBuilder: TransactionBuilder) {
+            val destinationAccountIn = involvedAccountsMap[toAccount]!!
+            val destinationNode = destinationAccountIn.state.data.ourParty
+
+            val senderAccountIn = involvedAccountsMap[toAccount]!!
+
+            // Move token to destination
+            val dvPtr = getDvTokenPointer()
+
+            // Move token to another node
+            moveTokenToAnotherNode(
+                    txBuilder = txBuilder,
+                    destinationNode = destinationNode,
+                    dvPtr = dvPtr
+            )
+
+            // Update amount in receiver account
+            updateReceiverAmount(
+                    txBuilder = txBuilder,
+                    destinationAccountIn = destinationAccountIn,
+                    dvPtr = dvPtr
+            )
+
+            // Update amount in receiver account
+            updateSenderAmount(
+                    txBuilder = txBuilder,
+                    senderAccountIn = senderAccountIn,
+                    dvPtr = dvPtr
+            )
+        }
+
+        /**
+         * Method for move the token to another node
+         * we will check destination input not be our node before add to the transaction
+         * if destination is same out node no need to do anything
+         */
+        private fun moveTokenToAnotherNode(txBuilder: TransactionBuilder, destinationNode: Party, dvPtr: TokenPointer<DVToken>) {
             // Check account in our node ?
             if (destinationNode != ourIdentity) {
 
+                val amountToken = amount of dvPtr
                 val changeHolder = serviceHub.keyManagementService.freshKeyAndCert(ourIdentityAndCert, false).party.anonymise()
                 addMoveFungibleTokens(
                         transactionBuilder = txBuilder,
@@ -155,16 +230,26 @@ object TransferDVToken {
                 )
 
             }
+        }
 
-            // Update amount in account
+        /**
+         * Method for update amount of receiver
+         * Increase amount value
+         */
+        private fun updateReceiverAmount(txBuilder: TransactionBuilder,
+                                         destinationAccountIn: StateAndRef<Account>,
+                                         dvPtr: TokenPointer<DVToken>) {
+
+            val destinationNode = destinationAccountIn.state.data.ourParty
+            // Update amount in receiver account
             val updatedAmount = ((destinationAccountIn.state.data.amount?.amount?.toDecimal()?: BigDecimal.ZERO) +
-                    amount) of dvPtr issuedBy issuer heldBy ourIdentity
+                    amount) of dvPtr issuedBy issuer heldBy destinationNode
 
             val destinationAccountOut = destinationAccountIn.state.data.copy(
                     amount = updatedAmount
             )
 
-            val txCommand = Command(AccountContract.Commands.UpdateAmount(), destinationAccountOut.participants.map { it.owningKey })
+            val txCommand = Command(AccountContract.Commands.UpdateReceiverAmount(), destinationAccountOut.participants.map { it.owningKey })
 
             // update account amount
             txBuilder.apply {
@@ -172,11 +257,33 @@ object TransferDVToken {
                 addOutputState(destinationAccountOut, AccountContract.ACCOUNT_CONTRACT_ID)
                 addCommand(txCommand)
             }
-
         }
 
-        private fun transferFromAccountToAccount() {
-            //TODO
+        /**
+         * Method for update amount of sender
+         * Decrease amount value
+         */
+        private fun updateSenderAmount(txBuilder: TransactionBuilder,
+                                       senderAccountIn: StateAndRef<Account>,
+                                       dvPtr: TokenPointer<DVToken>) {
+
+            val senderNode = senderAccountIn.state.data.ourParty
+            // update amount in sender account
+            val updatedAmount = ((senderAccountIn.state.data.amount?.amount?.toDecimal()?: BigDecimal.ZERO) -
+                    amount) of dvPtr issuedBy issuer heldBy senderNode
+
+            val senderAccountOut = senderAccountIn.state.data.copy(
+                    amount = updatedAmount
+            )
+
+            val txCommand = Command(AccountContract.Commands.UpdateSenderAmount(), senderAccountOut.participants.map { it.owningKey })
+
+            // update account amount
+            txBuilder.apply {
+                addInputState(senderAccountIn)
+                addOutputState(senderAccountOut, AccountContract.ACCOUNT_CONTRACT_ID)
+                addCommand(txCommand)
+            }
         }
 
         private fun getDvTokenPointer(): TokenPointer<DVToken> {

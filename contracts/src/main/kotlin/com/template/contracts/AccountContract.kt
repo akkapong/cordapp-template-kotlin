@@ -1,7 +1,5 @@
 package com.template.contracts
 
-import com.r3.corda.lib.tokens.contracts.EvolvableTokenContract
-import com.template.states.AKKTokenType
 import net.corda.core.contracts.*
 import net.corda.core.transactions.LedgerTransaction
 import net.corda.core.utilities.loggerFor
@@ -17,7 +15,8 @@ class AccountContract : Contract {
 
     interface Commands : CommandData {
         class Create : TypeOnlyCommandData(), Commands
-        class UpdateAmount : TypeOnlyCommandData(), Commands
+        class UpdateReceiverAmount : TypeOnlyCommandData(), Commands
+        class UpdateSenderAmount : TypeOnlyCommandData(), Commands
     }
 
     override fun verify(tx: LedgerTransaction) {
@@ -25,7 +24,8 @@ class AccountContract : Contract {
         val setOfSigners = command.signers.toSet()
         when (command.value) {
             is Commands.Create -> verifyCreate(tx, setOfSigners)
-            is Commands.UpdateAmount -> verifyUpdateAmount(tx, setOfSigners)
+            is Commands.UpdateReceiverAmount -> verifyUpdateReceiverAmount(tx, setOfSigners)
+            is Commands.UpdateSenderAmount -> verifyUpdateSenderAmount(tx, setOfSigners)
         }
     }
 
@@ -33,7 +33,11 @@ class AccountContract : Contract {
         //TODO
     }
 
-    private fun verifyUpdateAmount(tx: LedgerTransaction, signers: Set<PublicKey>) = requireThat {
+    private fun verifyUpdateReceiverAmount(tx: LedgerTransaction, signers: Set<PublicKey>) = requireThat {
+        //TODO
+    }
+
+    private fun verifyUpdateSenderAmount(tx: LedgerTransaction, signers: Set<PublicKey>) = requireThat {
         //TODO
     }
 
