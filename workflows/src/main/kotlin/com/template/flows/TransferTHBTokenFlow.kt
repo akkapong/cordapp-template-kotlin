@@ -32,8 +32,6 @@ class TransferTHBTokenFlow(private val amount: BigDecimal,
 
         inspect()
 
-        val participants = listOf(ourIdentity, newHolder)
-
         val changeHolder = serviceHub.keyManagementService.freshKeyAndCert(ourIdentityAndCert, false).party.anonymise()
 
         val thbToken = amount of THB

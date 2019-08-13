@@ -35,7 +35,7 @@ import java.math.BigDecimal
 object TransferDVToken {
     @InitiatingFlow
     @StartableByRPC
-    class Initiator(val fromAccount: String? = null,
+    class Initiator(val fromAccount: String,
                     val toAccount: String,
                     val amount: BigDecimal) : FlowLogic<SignedTransaction>() {
 
@@ -62,17 +62,18 @@ object TransferDVToken {
 
         override val progressTracker = tracker()
 
-        private lateinit var involvedAccountsMap: MutableMap<String, StateAndRef<Account>>
+        private val involvedAccountsMap = mutableMapOf<String, StateAndRef<Account>>()
 
-        private val issuer = serviceHub.identityService.wellKnownPartyFromX500Name(CordaX500Name.parse("O=PartyA,L=London,C=GB"))!!
+        private lateinit var issuer: Party
 
+        private val NODE = "NODE"
         /**
          * The flow logic is encapsulated within the call() method.
          */
         @Suspendable
         override fun call(): SignedTransaction {
             // Obtain a reference to the notary we want to use.
-            val notary = serviceHub.networkMapCache.notaryIdentities[0]
+            issuer = serviceHub.identityService.wellKnownPartyFromX500Name(CordaX500Name.parse("O=PartyA,L=London,C=GB"))!!
 
             inspect()
 
@@ -82,7 +83,7 @@ object TransferDVToken {
             val txBuilder = TransactionBuilder(notary = getPreferredNotary(serviceHub))
 
             // If from account is null or empty we will transfer amount from node to account
-            when (fromAccount.isNullOrEmpty()) {
+            when (fromAccount == NODE) {
                 true -> transferFromNodeToAccount(txBuilder)
                 false -> transferFromAccountToAccount(txBuilder)
             }
@@ -121,7 +122,7 @@ object TransferDVToken {
         }
 
         fun inspect() {
-            val involvedAccounts = listOfNotNull(fromAccount, toAccount)
+            val involvedAccounts = listOf(fromAccount, toAccount).filterNot { it == NODE  }
             val existingAccounts = getExistingAccountByName(involvedAccounts)
 
 
@@ -134,7 +135,7 @@ object TransferDVToken {
 
             "Destination must not be empty." using (toAccount.isNotEmpty() && involvedAccountsMap[toAccount] != null)
 
-            if (fromAccount != null) {
+            if (fromAccount != NODE) {
                 // Check available amount
                 val senderAccount = involvedAccountsMap[fromAccount]!!.state.data
                 val senderAmount = senderAccount.amount?.amount?.toDecimal() ?: BigDecimal.ZERO
@@ -322,7 +323,6 @@ object TransferDVToken {
                     "This must be an Account transaction." using (account is Account)
                 }
             }
-            val txId = subFlow(signTransactionFlow).id
 
             return subFlow(ObserverAwareFinalityFlowHandler(otherPartySession))
         }

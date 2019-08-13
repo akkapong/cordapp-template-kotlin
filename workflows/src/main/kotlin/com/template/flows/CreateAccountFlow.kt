@@ -22,8 +22,7 @@ object CreateAccountFlow {
     @InitiatingFlow
     @StartableByRPC
     class Initiator(val accountName: String,
-                    val otherParty: Party,
-                    val amount: BigDecimal) : FlowLogic<SignedTransaction>() {
+                    val otherParty: Party) : FlowLogic<SignedTransaction>() {
         /**
          * The progress tracker checkpoints each stage of the flow and outputs the specified messages when each
          * checkpoint is reached in the code. See the 'progressTracker.currentStep' expressions within the call() function.
