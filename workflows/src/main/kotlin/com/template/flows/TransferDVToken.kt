@@ -11,12 +11,14 @@ import com.r3.corda.lib.tokens.workflows.internal.flows.finality.ObserverAwareFi
 import com.r3.corda.lib.tokens.workflows.internal.flows.finality.ObserverAwareFinalityFlowHandler
 import com.r3.corda.lib.tokens.workflows.types.PartyAndAmount
 import com.r3.corda.lib.tokens.workflows.utilities.getPreferredNotary
+import com.r3.corda.lib.tokens.workflows.utilities.ourSigningKeys
 import com.template.contracts.AccountContract
 import com.template.schemas.AccountSchema
 import com.template.states.Account
 import com.template.states.DVToken
 import com.template.utilities.Conditions.using
 import com.template.utilities.getAllParties
+import com.template.utilities.getParticipantsKey
 import net.corda.core.contracts.Command
 import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.requireThat
@@ -98,7 +100,8 @@ object TransferDVToken {
             // Stage 3.
             progressTracker.currentStep = SIGNING_TRANSACTION
             // Sign the transaction.
-            val partSignedTx = serviceHub.signInitialTransaction(txBuilder)
+            val ourSigningKeys = txBuilder.toLedgerTransaction(serviceHub).ourSigningKeys(serviceHub)
+            val partSignedTx = serviceHub.signInitialTransaction(txBuilder, signingPubKeys = ourSigningKeys)
 
             val otherAbstractParty = getAllParties(serviceHub).filterNot { it == ourIdentity }.single()
 
@@ -107,18 +110,19 @@ object TransferDVToken {
             progressTracker.currentStep = GATHERING_SIGS
             // Send the state to the counterparty, and receive it back with their signature.
             val otherPartySession = initiateFlow(otherParty)
-            val fullySignedTx = subFlow(CollectSignaturesFlow(partSignedTx, setOf(otherPartySession), GATHERING_SIGS.childProgressTracker()))
+            
 
-
+            val fullySignedTx = subFlow(CollectSignaturesFlow(partSignedTx, listOf(otherPartySession), ourSigningKeys))
+//            val fullySignedTx = partSignedTx + signedTx
             // Update distribution list.
-            subFlow(UpdateDistributionListFlow(fullySignedTx))
+//            subFlow(UpdateDistributionListFlow(fullySignedTx))
 
             // Stage 5.
             progressTracker.currentStep = FINALISING_TRANSACTION
-            return subFlow(ObserverAwareFinalityFlow(fullySignedTx, listOf(otherPartySession)))
+//            return subFlow(ObserverAwareFinalityFlow(fullySignedTx, listOf(otherPartySession)))
 
 //            // Notarise and record the transaction in both parties' vaults.
-//            return subFlow(FinalityFlow(fullySignedTx, setOf(otherPartySession), FINALISING_TRANSACTION.childProgressTracker()))
+            return subFlow(FinalityFlow(fullySignedTx, setOf(otherPartySession), FINALISING_TRANSACTION.childProgressTracker()))
         }
 
         fun inspect() {
@@ -185,7 +189,7 @@ object TransferDVToken {
             val destinationAccountIn = involvedAccountsMap[toAccount]!!
             val destinationNode = destinationAccountIn.state.data.ourParty
 
-            val senderAccountIn = involvedAccountsMap[toAccount]!!
+            val senderAccountIn = involvedAccountsMap[fromAccount]!!
 
             // Move token to destination
             val dvPtr = getDvTokenPointer()
@@ -269,6 +273,12 @@ object TransferDVToken {
                                        dvPtr: TokenPointer<DVToken>) {
 
             val senderNode = senderAccountIn.state.data.ourParty
+
+            val senderAccount = senderAccountIn.state.data
+            logger.info("updateSenderAmount sender : $senderAccount")
+            logger.info("updateSenderAmount sender amount : ${senderAccount.amount?.amount}")
+            logger.info("updateSenderAmount old amount : ${(senderAccountIn.state.data.amount?.amount?.toDecimal()?: BigDecimal.ZERO)}")
+            logger.info("updateSenderAmount amount input : $amount")
             // update amount in sender account
             val updatedAmount = ((senderAccountIn.state.data.amount?.amount?.toDecimal()?: BigDecimal.ZERO) -
                     amount) of dvPtr issuedBy issuer heldBy senderNode
@@ -314,17 +324,20 @@ object TransferDVToken {
     }
 
     @InitiatedBy(Initiator::class)
-    class Acceptor(val otherPartySession: FlowSession) : FlowLogic<Unit>() {
+    class Acceptor(val otherPartySession: FlowSession) : FlowLogic<SignedTransaction>() {
         @Suspendable
-        override fun call(): Unit {
+        override fun call(): SignedTransaction {
             val signTransactionFlow = object : SignTransactionFlow(otherPartySession) {
                 override fun checkTransaction(stx: SignedTransaction) = requireThat {
-                    val account = stx.tx.outputsOfType<Account>().single()
-                    "This must be an Account transaction." using (account is Account)
+                    val accounts = stx.tx.outputsOfType<Account>()
+                    "This must have the Account in transaction." using (accounts.isNotEmpty())
                 }
             }
 
-            return subFlow(ObserverAwareFinalityFlowHandler(otherPartySession))
+            val stx = subFlow(signTransactionFlow)
+
+            return subFlow(ReceiveFinalityFlow(otherPartySession, stx.id))
+//            return subFlow(ObserverAwareFinalityFlowHandler(otherPartySession))
         }
     }
 }
